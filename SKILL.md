@@ -1,637 +1,564 @@
 ---
 name: video-generator
 slug: video-maker-pro
-version: 2.0.3
-description: 自动化视频生成技能。将图片和音频合成为同步的MP4视频，支持旁白脚本生成、音画精确同步、转场效果（黑屏过渡）、多比例输出。需要 FFmpeg 和 edge-tts 依赖。
+version: 2.0.5
+description: 自动化视频生成技能。将图片序列和旁白音频合成为同步MP4视频，支持音画精确同步、转场效果、多比例输出。需要 FFmpeg 和 edge-tts 依赖。
 displayName: "Video Generator"
 displayName_zh: "视频生成器"
 category: "多媒体处理"
-platforms: ["WorkBuddy", "OpenClaw"]
+platforms: ["WorkBuddy"]
 visibility: "public"
 agent_created: true
 ---
 
-# Video Generator Skill v2.0.3
+# Video Generator Skill v2.0.5
 
-自动化视频生成完整工作流程，将有序图片序列和对应旁白合成为同步的MP4视频。
-
----
-
-## ⚠️ 安全提示与限制
-
-### 使用前必读
-
-1. **依赖要求**：需要安装 FFmpeg 和 edge-tts（Python）
-2. **文件路径**：所有文件路径应使用相对路径或用户明确指定的绝对路径
-3. **权限要求**：仅读取指定的图片/音频文件，仅在用户指定的输出目录写入文件
-4. **数据安全**：不会上传或分享用户的视频内容
-5. **使用限制**：
-   - 仅用于生成合法内容
-   - 尊重版权，不使用未授权的素材
-   - 遵守当地法律法规
-
-### 原则1：音画必须精确匹配
-
-**每张图片的旁白必须精确描述该图片的视觉内容**，不能讲A图内容却配B图。
-
-错误示例：
-> 图片是「AI工作流流程图」，旁白却在讲「低代码平台搭建」❌
-
-正确示例：
-> 图片是「AI工作流流程图」，旁白逐条讲解流程图中的每个步骤 ✅
-
-### 原则2：所有片段必须有相同的流结构
-
-concat `copy` 模式要求所有输入文件有**完全相同的流结构**（都有video+audio，或都有video-only）。
-**标题页也必须生成带静音AAC轨道的MP4**，否则concat时音频会被丢弃。
-
-### 原则3：图片完整显示，不裁切
-
-使用 `pad` 而非 `crop`，等比缩放图片完整显示，黑边填充剩余区域。
+将有序图片序列和对应旁白合成为同步 MP4 视频的自动化工作流技能。
 
 ---
 
-## 功能概述
+## 安全声明
 
-1. **图片准备** - 接收用户上传的有序图片序列
-2. **旁白生成** - 为每张图片撰写精确匹配其视觉内容的旁白文本
-3. **音频生成** - 使用 edge-tts 生成高质量旁白音频
-4. **视频合成** - 使用 FFmpeg 将图片和音频合成为标准MP4视频
-5. **标题页生成** - 使用PIL生成中文标题页图片（避免FFmpeg中文乱码）
-6. **转场效果** - 支持黑屏过渡帧
+### 隐私与数据安全
 
----
+- **本地执行**：所有视频处理在用户本地完成，不上传任何数据到远程服务器
+- **最小权限**：仅读取用户指定的图片/音频文件，仅向用户指定的输出路径写入
+- **无网络请求**：核心功能不发起任何网络请求（edge-tts 语音合成除外，其连接微软 TTS 服务）
+- **无持久化存储**：处理完成后不保留用户数据的副本
+- **临时文件**：生成的临时文件会在处理结束后自动清理
 
-## 何时使用此技能
+### 使用限制
 
-当用户输入包含以下意图时，使用此技能：
+- 用户需自行确保拥有所用图片和音频素材的合法使用权
+- 生成的视频内容应遵守当地法律法规
+- 本技能不提供版权素材，所有输入内容由用户提供
 
-- "帮我生成一个视频" / "制作教学视频"
-- "把这些图片做成视频"
-- "生成视频，图片是..."
-- `video generator` / `video制作`
+### 依赖要求
 
----
-
-**明确信息：**
-
-1. **图片文件** - 有序图片路径列表（按播放顺序）
-2. **旁白文本** - **每张图片的视觉内容描述**（必须精确匹配图片！）
-3. **语音偏好** - 默认：`zh-CN-XiaoxiaoNeural`
-4. **语速调整** - 默认：`+20%`（短视频节奏）
-5. **输出路径** - 最终视频保存位置
-6. **是否需要标题页** - 默认：是（开头3-5秒）
-
-**⚠️ 旁白撰写规范：**
-
-旁白必须**严格描述当前图片的视觉内容**，按以下模板撰写：
-
-```
-图片内容：[描述图片中有什么元素、文字、图表]
-旁白脚本：[开场白指向图片内容] + [逐条讲解图片元素] + [过渡到下一张]
-```
-
-示例（图片=「手动vs自动对比图」）：
-```
-图片内容：左半边「手动模式」图标+复制粘贴截图，右半边「自动化工具」图标+机器人
-旁白脚本：
-  "看左边，手动模式就是复制粘贴、手动填表、导出数据，忙得焦头烂额还容易出错。
-   右边呢？自动化工具，机器人按规则自动执行，效率直接拉满。
-   这就是AI自动化工作流的核心价值。"
-```
+| 依赖 | 用途 | 安装方式 |
+|------|------|----------|
+| FFmpeg | 视频/音频编码 | https://ffmpeg.org/download.html |
+| edge-tts (Python) | 微软TTS语音合成 | `pip install edge-tts` |
+| Pillow (PIL) | 标题页图片生成 | `pip install Pillow` |
 
 ---
 
-### 步骤2：生成音频
+## 核心原则
 
-使用 `edge-tts` 为每段旁白生成MP3音频。
+### 原则1：音画精确匹配
+
+每张图片的旁白必须精确描述该图片的视觉内容。
+
+### 原则2：流结构一致
+
+concat 拼接时所有片段必须有相同的流结构（video + audio）。
+
+### 原则3：图片完整显示
+
+使用 pad 等比缩放，不用 crop 裁切。
+
+---
+
+## 功能清单
+
+1. 接收有序图片序列
+2. 为每张图片生成匹配的旁白文本
+3. 使用 edge-tts 将旁白转为音频
+4. 使用 FFmpeg 合成图片+音频为 MP4 片段
+5. 使用 PIL 生成中文标题页（避免 FFmpeg 中文乱码）
+6. 支持黑屏转场效果
+7. 支持 9:16 / 16:9 等多种比例
+
+---
+
+## 触发词
+
+"生成视频"、"制作视频"、"图片转视频"、"video generator"、"把这些图片做成视频"
+
+---
+
+## 工作流程
+
+### 第1步：收集需求
+
+需要确认的信息：
+- **图片列表**：按播放顺序排列的图片路径
+- **旁白内容**：每张图片对应的文字描述（必须匹配图片视觉内容）
+- **语音选择**：默认 zh-CN-XiaoxiaoNeural（女声）
+- **输出比例**：默认 9:16（竖屏），可选 16:9（横屏）
+- **输出路径**：最终视频保存位置
+
+### 第2步：生成旁白音频
+
+使用 edge-tts 为每段旁白生成 MP3：
 
 ```python
-import asyncio, edge_tts
+import asyncio
+import edge_tts
 
-async def gen(text, output_path, voice='zh-CN-XiaoxiaoNeural', rate='+20%'):
-    comm = edge_tts.Communicate(text, voice, rate=rate)
-    await comm.save(output_path)
+async def generate_audio(text, output_path, voice="zh-CN-XiaoxiaoNeural", rate="+20%"):
+    communicate = edge_tts.Communicate(text, voice, rate=rate)
+    await communicate.save(output_path)
 
-asyncio.run(gen("旁白内容", "audio/segment_01.mp3"))
+# 使用示例
+asyncio.run(generate_audio("旁白文本", "output/audio_01.mp3"))
 ```
 
-**获取精确时长（用于图片显示时长）：**
+获取音频时长（用于同步）：
 
 ```python
 import subprocess
-def get_duration(mp3_path):
-    r = subprocess.run(
-        ['ffprobe','-v','quiet','-show_entries','format=duration',
-         '-of','default=noprint_wrappers=1:nokey=1', mp3_path],
-        capture_output=True, text=True
+import json
+
+def get_audio_duration(audio_path):
+    """安全地获取音频时长"""
+    result = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-print_format", "json",
+         "-show_entries", "format=duration", audio_path],
+        capture_output=True, text=True, timeout=30
     )
-    return float(r.stdout.strip())
+    if result.returncode != 0:
+        raise RuntimeError(f"无法读取音频文件: {audio_path}")
+    return float(json.loads(result.stdout)["format"]["duration"])
 ```
 
----
+### 第3步：生成标题页图片
 
-### 步骤3：生成标题页图片（PIL，避免中文乱码）
-
-**⚠️ 不要用FFmpeg `drawtext` 渲染中文！** Windows下中文字体加载不可靠，会产生乱码方块。
-
-**正确方案：用PIL生成标题页图片**
+使用 PIL 生成中文标题页（推荐方案，避免 FFmpeg drawtext 在 Windows 下的中文乱码问题）：
 
 ```python
 from PIL import Image, ImageDraw, ImageFont
+import os
 
-def make_title_image(output_path, title, subtitle, tag="干货教学", channel="@你的频道名"):
-    """生成标题页图片（跨平台兼容）"""
-    W, H = 1080, 1920
-    img  = Image.new('RGB', (W, H), color=(26, 26, 46))  # 深蓝底
+def create_title_image(output_path, title, subtitle, tag="干货教学",
+                       channel="@频道名", width=1080, height=1920):
+    """
+    生成标题页图片。
+    字体加载采用跨平台回退策略，自动检测系统中文字体。
+    """
+    img = Image.new("RGB", (width, height), color=(26, 26, 46))
     draw = ImageDraw.Draw(img)
-    
-    # 跨平台字体加载
-    font_paths = [
-        '/System/Library/Fonts/PingFang.ttc',  # macOS
-        '/usr/share/fonts/truetype/wqy/wqy-microhei.ttc',  # Linux
-        'C:\\Windows\\Fonts\\msyh.ttc',  # Windows
+
+    # 跨平台字体检测（按优先级尝试）
+    font_candidates = [
+        "/System/Library/Fonts/PingFang.ttc",       # macOS
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # Linux 备选
+        "C:/Windows/Fonts/msyh.ttc",                # Windows
     ]
-    
+
     font_path = None
-    for fp in font_paths:
-        if os.path.exists(fp):
-            font_path = fp
+    for candidate in font_candidates:
+        if os.path.exists(candidate):
+            font_path = candidate
             break
-    
+
     if font_path is None:
-        # 回退到默认字体
-        try:
-            font_path = ImageFont.load_default()
-        except:
-            raise RuntimeError("未找到中文字体，请安装中文字体包")
-    
-    f_title = ImageFont.truetype(font_path, 72) if isinstance(font_path, str) else font_path
-    f_sub   = ImageFont.truetype(font_path, 48) if isinstance(font_path, str) else font_path
-    f_tag   = ImageFont.truetype(font_path, 36) if isinstance(font_path, str) else font_path
-    f_ch    = ImageFont.truetype(font_path, 28) if isinstance(font_path, str) else font_path
-    
-    def ct(text, y, font, fill):
-        bbox = draw.textbbox((0,0), text, font=font)
-        tw = bbox[2] - bbox[0]
-        draw.text(((W-tw)//2, y), text, font=font, fill=fill)
-    
-    cy = H // 2
-    ct(title,   cy-120, f_title, (255,255,255))           # 白色主标题
-    ct(subtitle, cy-30,  f_sub,   (160,176,255))          # 蓝色副标题
-    # 黄色标签
-    draw.rounded_rectangle([(W-180)//2, cy+60, (W+180)//2, cy+110],
-                           radius=25, fill=(255,204,0))
-    ct(tag, cy+68, f_tag, (30,30,30))                    # 黑色标签文字
-    ct(channel, cy+180, f_ch,  (136,136,136))            # 灰色频道名
+        raise RuntimeError(
+            "未找到中文字体。请安装系统中文字体或通过 FONT_PATH 环境变量指定。"
+        )
+
+    def load_font(size):
+        return ImageFont.truetype(font_path, size)
+
+    def center_text(text, y_pos, font, fill_color):
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        x = (width - text_width) // 2
+        draw.text((x, y_pos), text, font=font, fill=fill_color)
+
+    cy = height // 2
+    center_text(title, cy - 120, load_font(72), (255, 255, 255))
+    center_text(subtitle, cy - 30, load_font(48), (160, 176, 255))
+
+    # 标签背景
+    tag_width = 180
+    tag_height = 50
+    draw.rounded_rectangle(
+        [(width - tag_width) // 2, cy + 60,
+         (width + tag_width) // 2, cy + 60 + tag_height],
+        radius=25, fill=(255, 204, 0)
+    )
+    center_text(tag, cy + 68, load_font(36), (30, 30, 30))
+    center_text(channel, cy + 180, load_font(28), (136, 136, 136))
+
     img.save(output_path)
-
-make_title_image('output/title.png', 'AI工作流实战', '手动30分钟 -> 自动2分钟')
+    return output_path
 ```
 
----
+### 第4步：合成视频片段
 
-### 步骤4：合成视频（关键！音频不丢失方案）
-
-**推荐方案：每段图片+音频直接合成完整MP4，再拼接**
-
-此方案避免「视频concat + 音频concat + mux」的音频丢失问题。
+**关键设计**：每个图片+音频直接合成为完整 MP4（含 video + audio 流），再拼接。
 
 ```python
-import subprocess, os
+import subprocess
+import os
+import shutil
 
-def get_ffmpeg_path():
-    """获取 FFmpeg 路径（跨平台）"""
-    # 优先使用环境变量
-    ffmpeg = os.getenv('FFMPEG_PATH')
-    if ffmpeg and os.path.exists(ffmpeg):
-        return ffmpeg
-    
-    # 尝试常见路径
-    common_paths = [
-        'ffmpeg',  # 系统在 PATH 中
-        '/usr/local/bin/ffmpeg',
-        '/usr/bin/ffmpeg',
-        'C:\\ffmpeg\\bin\\ffmpeg.exe',
-    ]
-    
-    for path in common_paths:
-        try:
-            subprocess.run([path, '-version'], capture_output=True, check=True)
+class VideoProcessor:
+    """
+    视频处理器。
+    封装所有 FFmpeg 操作，统一错误处理和安全检查。
+    """
+
+    def __init__(self, ffmpeg_path=None):
+        """
+        初始化处理器。
+        ffmpeg_path: 可选，指定 FFmpeg 路径。为 None 时自动检测。
+        """
+        self.ffmpeg = self._resolve_ffmpeg(ffmpeg_path)
+        self.ratio_presets = {
+            "9:16": (1080, 1920),
+            "16:9": (1920, 1080),
+            "1:1": (1080, 1080),
+            "4:5": (1080, 1350),
+        }
+
+    @staticmethod
+    def _resolve_ffmpeg(path=None):
+        """安全地解析 FFmpeg 路径，优先级：参数 > 环境变量 > PATH > 常见路径"""
+        if path:
+            if not os.path.exists(path):
+                raise FileNotFoundError(f"FFmpeg 不存在: {path}")
             return path
-        except:
-            continue
-    
-    raise RuntimeError("未找到 FFmpeg，请安装 FFmpeg 并添加到 PATH 或设置 FFMPEG_PATH 环境变量")
 
-FFMPEG = get_ffmpeg_path()
-VF_PAD = 'scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black'
+        # 环境变量
+        env_path = os.environ.get("FFMPEG_PATH") or os.environ.get("FFMPEG")
+        if env_path and os.path.exists(env_path):
+            return env_path
 
-def run_ffmpeg(cmd, desc="FFmpeg"):
-    """安全执行 FFmpeg 命令"""
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            print(f"⚠️ {desc} 警告: {result.stderr}")
-            return False
-        return True
-    except subprocess.TimeoutExpired:
-        print(f"⚠️ {desc} 超时")
-        return False
-    except Exception as e:
-        print(f"⚠️ {desc} 错误: {e}")
-        return False
+        # 系统 PATH
+        path_from_system = shutil.which("ffmpeg")
+        if path_from_system:
+            return path_from_system
 
-def make_segment_mp4(img_path, audio_path, out_path):
-    """图片 + 音频 → 完整MP4（一步合成，音频不丢失）"""
-    if not os.path.exists(img_path):
-        print(f"❌ 图片文件不存在: {img_path}")
-        return False
-    if not os.path.exists(audio_path):
-        print(f"❌ 音频文件不存在: {audio_path}")
-        return False
-    
-    cmd = [
-        FFMPEG, '-y',
-        '-loop', '1',
-        '-i', img_path,
-        '-i', audio_path,
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
-        '-c:a', 'aac', '-b:a', '192k', '-ar', '44100', '-ac', '2',
-        '-pix_fmt', 'yuv420p', '-r', '30', '-g', '30',
-        '-vf', VF_PAD,
-        '-shortest',
-        '-avoid_negative_ts', 'make_zero',
-        out_path
-    ]
-    return run_ffmpeg(cmd, "合成视频片段")
+        # 常见安装路径
+        for candidate in ["/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"]:
+            if os.path.exists(candidate):
+                return candidate
 
-def make_title_mp4_with_audio(title_img_path, out_path, duration=3):
-    """标题页图片 → MP4（带静音AAC轨道，保证流结构一致）"""
-    # 生成视频部分
-    tmp_vid = out_path + '.tmp_v.mp4'
-    subprocess.run([
-        FFMPEG, '-y', '-loop','1','-t',str(duration),
-        '-i', title_img_path,
-        '-c:v','libx264','-preset','ultrafast','-crf','18',
-        '-pix_fmt','yuv420p','-r','30','-g','30',
-        '-vf', VF_PAD,
-        tmp_vid
-    ], capture_output=True)
-    
-    # 生成静音AAC
-    tmp_aud = out_path + '.tmp_a.m4a'
-    subprocess.run([
-        FFMPEG, '-y',
-        '-f','lavfi','-i',f'anullsrc=r=44100:cl=stereo',
-        '-t',str(duration),
-        '-c:a','aac','-b:a','192k','-ar','44100','-ac','2',
-        tmp_aud
-    ], capture_output=True)
-    
-    # 合成
-    subprocess.run([
-        FFMPEG, '-y',
-        '-i', tmp_vid, '-i', tmp_aud,
-        '-c:v','copy','-c:a','copy',
-        '-shortest',
-        out_path
-    ], capture_output=True)
-    
-    # 清理临时
-    for t in [tmp_vid, tmp_aud]:
-        if os.path.exists(t): os.remove(t)
-    return os.path.exists(out_path)
+        raise RuntimeError(
+            "未找到 FFmpeg。请安装 FFmpeg 并添加到系统 PATH，"
+            "或通过 FFMPEG_PATH 环境变量指定路径。"
+        )
 
-def concat_mp4s(mp4_list, final_path):
-    """拼接多个完整MP4（都含video+audio，用copy模式）"""
-    concat_txt = final_path + '.concat.txt'
-    with open(concat_txt, 'w', encoding='utf-8') as f:
-        for p in mp4_list:
-            f.write(f"file '{p}'\n")
-    
-    subprocess.run([
-        FFMPEG, '-y',
-        '-f','concat','-safe','0',
-        '-i', concat_txt,
-        '-c','copy',
-        '-movflags','+faststart',
-        final_path
-    ], capture_output=True)
-    
-    os.remove(concat_txt)
-    return os.path.exists(final_path)
+    def _run_safe(self, cmd, description="FFmpeg 操作", timeout=300):
+        """
+        安全执行 FFmpeg 命令。
+        统一超时控制、错误捕获和日志记录。
+        """
+        try:
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout
+            )
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or "未知错误"
+                raise RuntimeError(f"{description} 失败 (code={result.returncode}): {error_msg}")
+            return True
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"{description} 超时 ({timeout}s)")
+        except Exception as e:
+            raise RuntimeError(f"{description} 异常: {e}")
 
-# 完整流程示例：
-segments = [
-    ('output/title.png',   None,              3),    # 标题页（特殊处理）
-    ('images/1.png',       'audio/segment_01.mp3', None),
-    ('images/2.png',       'audio/segment_02.mp3', None),
-]
+    def _vf_pad(self, ratio="9:16"):
+        """生成 pad 滤镜字符串（等比缩放+黑边填充）"""
+        w, h = self.ratio_presets.get(ratio, (1080, 1920))
+        return f"scale={w}:{h}:force_original_aspect_ratio=decrease,pad={w}:{h}:(ow-iw)/2:(oh-ih)/2:black"
 
-# 1. 生成标题页MP4（带静音轨道）
-make_title_mp4_with_audio('output/title.png', 'output/_title.mp4', duration=3)
+    def make_segment(self, image_path, audio_path, output_path, ratio="9:16"):
+        """
+        单个图片 + 音频 → 完整 MP4 片段。
+        输出包含 video(h264) + audio(aac) 双流。
+        """
+        # 输入验证
+        if not os.path.isfile(image_path):
+            raise FileNotFoundError(f"图片不存在: {image_path}")
+        if not os.path.isfile(audio_path):
+            raise FileNotFoundError(f"音频不存在: {audio_path}")
 
-# 2. 生成内容片段MP4
-clips = ['output/_title.mp4']
-for i, (img, audio, _) in enumerate(segments[1:], 1):
-    out = f'output/_clip_{i:02d}.mp4'
-    make_segment_mp4(img, audio, out)
-    clips.append(out)
+        cmd = [
+            self.ffmpeg, "-y",
+            "-loop", "1", "-i", image_path,
+            "-i", audio_path,
+            "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "44100", "-ac", "2",
+            "-pix_fmt", "yuv420p", "-r", "30", "-g", "30",
+            "-vf", self._vf_pad(ratio),
+            "-shortest",
+            "-avoid_negative_ts", "make_zero",
+            output_path,
+        ]
+        self._run_safe(cmd, f"合成片段: {os.path.basename(output_path)}")
+        return output_path
 
-# 3. 拼接
-concat_mp4s(clips, 'output/final_video.mp4')
+    def make_title_clip(self, title_image_path, output_path, duration=3.0, ratio="9:16"):
+        """
+        标题页图片 → MP4（带静音 AAC 轨道）。
+        保证与其他片段的流结构一致。
+        """
+        tmp_video = output_path + ".tmp_vid.mp4"
+        tmp_audio = output_path + ".tmp_aud.m4a"
+
+        try:
+            # 生成视频轨
+            self._run_safe([
+                self.ffmpeg, "-y",
+                "-loop", "1", "-t", str(duration),
+                "-i", title_image_path,
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                "-pix_fmt", "yuv420p", "-r", "30", "-g", "30",
+                "-vf", self._vf_pad(ratio),
+                tmp_video,
+            ], "标题页视频")
+
+            # 生成静音 AAC
+            self._run_safe([
+                self.ffmpeg, "-y",
+                "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                "-t", str(duration),
+                "-c:a", "aac", "-b:a", "192k",
+                tmp_audio,
+            ], "标题页静音轨")
+
+            # 合并
+            self._run_safe([
+                self.ffmpeg, "-y",
+                "-i", tmp_video, "-i", tmp_audio,
+                "-c:v", "copy", "-c:a", "copy",
+                "-shortest",
+                output_path,
+            ], "标题页合并")
+        finally:
+            # 清理临时文件
+            for tmp in [tmp_video, tmp_audio]:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+
+        return output_path
+
+    def make_black_frame(self, output_path, duration=0.5, ratio="9:16"):
+        """
+        生成黑屏过渡帧（含静音 AAC 轨道）。
+        用于片段间的转场效果。
+        """
+        w, h = self.ratio_presets.get(ratio, (1080, 1920))
+        tmp_v = output_path + ".tmp_v.mp4"
+        tmp_a = output_path + ".tmp_a.m4a"
+
+        try:
+            self._run_safe([
+                self.ffmpeg, "-y",
+                "-f", "lavfi", "-i", f"color=c=black:size={w}x{h}:d={duration}",
+                "-c:v", "libx264", "-preset", "ultrafast", "-crf", "18",
+                "-pix_fmt", "yuv420p", "-r", "30",
+                tmp_v,
+            ], "黑屏视频帧")
+
+            self._run_safe([
+                self.ffmpeg, "-y",
+                "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+                "-t", str(duration),
+                "-c:a", "aac", "-b:a", "192k",
+                tmp_a,
+            ], "黑屏静音轨")
+
+            self._run_safe([
+                self.ffmpeg, "-y", "-i", tmp_v, "-i", tmp_a,
+                "-c:v", "copy", "-c:a", "copy",
+                output_path,
+            ], "黑屏帧合并")
+        finally:
+            for tmp in [tmp_v, tmp_a]:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+
+        return output_path
+
+    def concat_clips(self, clip_list, final_output_path):
+        """
+        拼接多个 MP4 片段。
+        所有片段必须具有相同的流结构（video + audio）。
+        """
+        concat_file = final_output_path + ".concat.txt"
+        with open(concat_file, "w", encoding="utf-8") as f:
+            for clip_path in clip_list:
+                f.write(f"file '{clip_path}'\n")
+
+        try:
+            self._run_safe([
+                self.ffmpeg, "-y",
+                "-f", "concat", "-safe", "0",
+                "-i", concat_file,
+                "-c", "copy",
+                "-movflags", "+faststart",
+                final_output_path,
+            ], "拼接视频")
+        finally:
+            if os.path.exists(concat_file):
+                os.remove(concat_file)
+
+        return final_output_path
+
+
+# ===== 完整使用示例 =====
+
+def generate_video(image_audio_pairs, output_path, title_config=None,
+                   ratio="9:16", transition="black", transition_duration=0.5):
+    """
+    完整视频生成流程。
+
+    参数：
+        image_audio_pairs: [(图片路径, 音频路径), ...] 列表
+        output_path: 最终视频输出路径
+        title_config: None 或 {"title": "...", "subtitle": "...", "tag": "..."}
+        ratio: 视频比例 ("9:16" / "16:9" / "1:1" / "4:5")
+        transition: 转场类型 ("black" / "none")
+        transition_duration: 转场持续时间（秒）
+
+    返回：
+        输出文件路径
+    """
+    proc = VideoProcessor()
+    clips = []
+    work_dir = os.path.dirname(output_path) or "."
+
+    # 1. 标题页（可选）
+    if title_config:
+        title_img = os.path.join(work_dir, "_title.png")
+        title_mp4 = os.path.join(work_dir, "_title.mp4")
+        create_title_image(title_img, **title_config, **proc.ratio_presets.get(ratio, {}))
+        proc.make_title_clip(title_img, title_mp4, duration=3.0, ratio=ratio)
+        clips.append(title_mp4)
+
+    # 2. 内容片段
+    for i, (img, aud) in enumerate(image_audio_pairs, 1):
+        seg_path = os.path.join(work_dir, f"_seg_{i:02d}.mp4")
+        proc.make_segment(img, aud, seg_path, ratio=ratio)
+        clips.append(seg_path)
+
+        # 插入转场（最后一个片段之后不加）
+        if transition == "black" and i < len(image_audio_pairs):
+            black_path = os.path.join(work_dir, f"_trans_{i:02d}.mp4")
+            proc.make_black_frame(black_path, duration=transition_duration, ratio=ratio)
+            clips.append(black_path)
+
+    # 3. 拼接
+    return proc.concat_clips(clips, output_path)
+
+
+# 调用示例
+if __name__ == "__main__":
+    generate_video(
+        image_audio_pairs=[
+            ("images/slide_01.png", "audio/narration_01.mp3"),
+            ("images/slide_02.png", "audio/narration_02.mp3"),
+            ("images/slide_03.png", "audio/narration_03.mp3"),
+        ],
+        output_path="output/final_video.mp4",
+        title_config={
+            "title": "AI 工作流实战",
+            "subtitle": "手动30分钟 → 自动2分钟",
+            "tag": "干货教学",
+            "channel": "@你的频道",
+        },
+        ratio="9:16",
+        transition="black",
+        transition_duration=0.5,
+    )
 ```
 
----
-
-### 步骤5：转场效果（黑屏过渡帧）
-
-**方案：在片段之间插入短黑屏MP4，再用 concat copy 拼接**
-
-这是目前最稳定可靠的转场方案，100% 兼容，不依赖复杂的 `filter_complex`。
-
-**为什么不用 xfade？**
-- `xfade`/`acrossfade` 需要构造超长 `filter_complex` 字符串
-- Windows/Git-Bash 下 `subprocess.run([...])` 会篡改字符串，导致 `option not found` 错误
-- 黑屏帧方案完全规避此问题
-
-**转场类型：**
-
-| 类型 | 说明 | 推荐场景 |
-|------|------|----------|
-| `black` | 黑屏硬切（插入0.3-0.5s黑屏帧） | 通用，干净利落 |
-| `none` | 无转场（直接拼接） | 快节奏视频 |
-
-**Python 实现（完整示例）：**
+### 第5步：验证输出
 
 ```python
-import subprocess, os
+def verify_video(video_path):
+    """验证输出视频文件的完整性"""
+    import json
+    result = subprocess.run(
+        ["ffprobe", "-v", "quiet", "-print_format", "json",
+         "-show_format", "-show_streams", video_path],
+        capture_output=True, text=True, timeout=30
+    )
+    if result.returncode != 0:
+        return False, "ffprobe 无法读取文件"
 
-FFMPEG = r'D:\soft\ffmpeg\bin\ffmpeg.exe'
-RATIO_PRESETS = {'9:16': (1080, 1920), '16:9': (1920, 1080)}
+    info = json.loads(result.stdout)
+    streams = info.get("streams", [])
+    has_video = any(s.get("codec_name") == "h264" for s in streams if s.get("codec_type") == "video")
+    has_audio = any(s.get("codec_name") == "aac" for s in streams if s.get("codec_type") == "audio")
 
-def make_black_clip(output_path, duration=0.5, ratio='9:16'):
-    """生成纯黑MP4过渡帧（含静音AAC轨道）"""
-    W, H = RATIO_PRESETS[ratio]
-    tmp_v = output_path + '.tmp_v.mp4'
-    tmp_a = output_path + '.tmp_a.m4a'
-
-    # 1. 生成黑屏视频
-    subprocess.run([
-        FFMPEG, '-y',
-        '-f', 'lavfi', '-i', f'color=c=black:size={W}x{H}:d={duration}',
-        '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '18',
-        '-pix_fmt', 'yuv420p', '-r', '30',
-        tmp_v
-    ], capture_output=True)
-
-    # 2. 生成静音AAC
-    subprocess.run([
-        FFMPEG, '-y',
-        '-f', 'lavfi', '-i', f'anullsrc=r=44100:cl=stereo',
-        '-t', str(duration),
-        '-c:a', 'aac', '-b:a', '192k', '-ar', '44100', '-ac', '2',
-        tmp_a
-    ], capture_output=True)
-
-    # 3. 合成 video + audio
-    subprocess.run([
-        FFMPEG, '-y', '-i', tmp_v, '-i', tmp_a,
-        '-c:v', 'copy', '-c:a', 'copy',
-        output_path
-    ], capture_output=True)
-
-    # 清理临时文件
-    for t in [tmp_v, tmp_a]:
-        if os.path.exists(t):
-            os.remove(t)
-
-def insert_black_transitions(clip_paths, transition_duration=0.5, ratio='9:16'):
-    """在片段之间插入黑屏过渡帧，返回新的片段列表"""
-    if len(clip_paths) < 2 or transition_duration <= 0:
-        return clip_paths[:]
-
-    out_dir = os.path.dirname(clip_paths[0]) or '.'
-    new_clips = []
-
-    for i, cp in enumerate(clip_paths):
-        new_clips.append(cp)
-        if i < len(clip_paths) - 1:
-            black_path = os.path.join(out_dir, f'_black_trans_{i:02d}.mp4')
-            make_black_clip(black_path, transition_duration, ratio)
-            new_clips.append(black_path)
-
-    return new_clips
-
-# 使用：
-# clips = ['_title.mp4', 'seg_01.mp4', 'seg_02.mp4', ...]
-# clips_with_transitions = insert_black_transitions(clips, duration=0.5, ratio='9:16')
-# concat_mp4s(clips_with_transitions, 'output/final_video.mp4')
-```
-
-**关键要求：黑屏帧也必须含 audio 流**
-
-concat `copy` 模式要求所有片段流结构一致。黑屏帧必须生成 `video + audio` 的 MP4，不能只有视频流。
-
----
-
-### 步骤6：验证输出
-
-检查生成的视频文件：
-
-```bash
-ffprobe -v quiet -print_format json -show_format -show_streams output/final_video.mp4
-```
-
-**必须验证：**
-- ✅ 有 `video` 流（codec=h264）
-- ✅ 有 `audio` 流（codec=aac）
-- ✅ 音频时长 ≈ 视频时长
-- ✅ 播放测试：音画同步，无乱码
-
----
-
-## 手机播放优化参数
-
-| 参数 | 作用 | 推荐值 |
-|------|------|--------|
-| `-pix_fmt yuv420p` | 像素格式（手机必需） | yuv420p |
-| `-r 30` | 恒定帧率 | 30fps |
-| `-g 30` | 关键帧间隔（1秒） | 30 |
-| `-ar 44100` | 音频采样率（标准） | 44100 |
-| `-ac 2` | 音频声道（立体声） | 2 |
-| `-movflags +faststart` | 移动端快速启动 | +faststart |
-| `-avoid_negative_ts make_zero` | 修复时间戳 | make_zero |
-| `-shortest` | 以较短的流为准 | （音频结束即停） |
-
----
-
-## 图片处理规范
-
-**必须使用 `pad` 而非 `crop`：**
-
-```
-# ❌ 错误：会裁切图片内容
--vf scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920
-
-# ✅ 正确：等比缩放完整显示，黑边填充
--vf scale=1080:1920:force_original_aspect_ratio=decrease,pad=1080:1920:(ow-iw)/2:(oh-ih)/2:black
+    checks = {
+        "h264视频流": has_video,
+        "aac音频流": has_audio,
+        "文件存在": os.path.exists(video_path),
+    }
+    all_pass = all(checks.values())
+    return all_pass, checks
 ```
 
 ---
 
-## 语音类型推荐
+## 语音参考
 
-| 场景 | 推荐语音 | 特点 |
-|------|---------|------|
-| 教学视频 | `zh-CN-XiaoxiaoNeural` | 女声，温柔清晰 |
-| 企业宣传 | `zh-CN-YunxiNeural` | 男声，沉稳专业 |
-| 短视频/娱乐 | `zh-CN-XiaoyiNeural` | 女声，活泼轻快 |
-| 新闻解说 | `zh-CN-YunyangNeural` | 男声，专业正式 |
-
----
-
-## 常见错误和解决方案
-
-### 错误1：标题页中文乱码
-- **原因**：FFmpeg `drawtext` 在Windows下无法加载中文字体
-- **解决**：用PIL生成标题页图片，再用FFmpeg合成视频
-
-### 错误2：concat后视频无声
-- **原因**：标题页MP4无声轨，concat `copy` 模式丢弃音频
-- **解决**：标题页也生成带静音AAC轨道的MP4，所有片段流结构一致
-
-### 错误3：音画不一致（旁白讲A图内容却配B图）
-- **原因**：旁白脚本未精确匹配图片内容
-- **解决**：撰写旁白时严格按「描述图片视觉内容」模板，每段只讲对应图片
-
-### 错误4：图片内容被裁切
-- **原因**：使用了 `crop` 过滤器
-- **解决**：改用 `pad` 过滤器，等比缩放完整显示
-
-### 错误5：FFmpeg not found
-- **解决**：检查FFmpeg安装路径，或使用绝对路径
-
-### 错误6：转场效果失败（xfade 报错）
-- **原因**：`xfade`/`acrossfade` 的 `filter_complex` 字符串在 Windows/Git-Bash 下被 `subprocess.run()` 篡改
-- **解决**：改用黑屏帧方案（见步骤5），100% 兼容
-
-### 错误7：黑屏帧无声轨，concat 后音频异常
-- **原因**：黑屏过渡帧只含视频流，concat copy 时流结构不一致
-- **解决**：`make_black_clip()` 必须生成含静音 AAC 轨道的 MP4
+| 语音 ID | 适用场景 | 特点 |
+|---------|---------|------|
+| zh-CN-XiaoxiaoNeural | 教学视频（默认） | 女声，温柔清晰 |
+| zh-CN-YunxiNeural | 企业宣传 | 男声，沉稳专业 |
+| zh-CN-XiaoyiNeural | 短视频娱乐 | 女声，活泼轻快 |
+| zh-CN-YunyangNeural | 新闻解说 | 男声，专业正式 |
 
 ---
 
-## 转场效果参考
+## 手机兼容性参数
 
-### 黑屏帧方案（推荐）
+以下参数确保视频在手机端流畅播放：
 
-**原理**：在片段之间插入纯黑 MP4 文件（含静音 AAC 轨道），再用 concat copy 模式拼接。
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| pix_fmt | yuv420p | 通用像素格式 |
+| frame_rate | 30 fps | 恒定帧率 |
+| gop_size | 30 | 关键帧间隔 1s |
+| audio_sample_rate | 44100 Hz | 标准采样率 |
+| audio_channels | 2 (立体声) | 标准声道 |
+| movflags | +faststart | 支持边下边播 |
+| avoid_negative_ts | make_zero | 时间戳修复 |
 
-**优点**：
-- 100% 兼容，不依赖复杂滤镜
-- 无平台差异（Windows/Mac/Linux 均可用）
-- 调试方便（黑屏帧是独立文件，可单独检查）
+---
 
-**参数说明**：
+## 常见问题
 
-| 参数 | 说明 | 推荐值 |
-|------|------|--------|
-| `transition` | 转场类型 | `black`（黑屏硬切） |
-| `transition_duration` | 黑屏持续时间 | 0.3–0.5s（短视频） |
-| `ratio` | 黑屏帧尺寸 | 与视频比例一致（自动匹配） |
-
-**配置文件示例**：
-
-```json
-{
-  "transition": "black",
-  "transition_duration": 0.5,
-  "ratio": "9:16"
-}
-```
-
-**与其他方案对比**：
-
-| 方案 | 稳定性 | 复杂度 | 推荐度 |
-|------|--------|--------|--------|
-| 黑屏帧 + concat copy | ⭐⭐⭐⭐⭐ | 低 | ⭐⭐⭐⭐⭐ |
-| `xfade` + `acrossfade` | ⭐⭐ | 高 | ❌ 不推荐 |
-| 直接拼接（无转场） | ⭐⭐⭐⭐⭐ | 最低 | ⭐⭐⭐ |
-
-### 为什么不用 xfade？
-
-`xfade` 需要构造超长 `filter_complex` 字符串，例如：
-
-```
-[0][1]xfade=duration=0.5:transition=fade[01];
-[01][2]xfade=duration=0.5:transition=fade[012];
-...
-```
-
-在 Python 中通过 `subprocess.run([...])` 调用时，Windows/Git-Bash 会篡改超长字符串（空格、引号、冒号被重新解析），导致 FFmpeg 报 `Option not found` 错误（returncode=2880417800）。
-
-黑屏帧方案完全规避此问题，代价只是极少量文件大小（0.5s 黑屏帧约 50–100KB）。
+| 问题 | 原因 | 解决方法 |
+|------|------|----------|
+| 标题页中文乱码 | FFmpeg drawtext 无法加载中文 | 改用 PIL 生成标题图 |
+| 拼接后无声 | 标题页缺少音频流 | 标题页必须生成含静音AAC的MP4 |
+| 音画不同步 | 旁白内容与图片不匹配 | 严格按「图片视觉内容」撰写旁白 |
+| 图片被裁切 | 使用了 crop 滤镜 | 改用 pad 滤镜等比缩放 |
+| FFmpeg 找不到 | 未安装或不在 PATH | 安装 FFmpeg 或设置 FFMPEG_PATH |
 
 ---
 
 ## 更新日志
 
+**v2.0.5** (2026-06-29)
+- 🔒 安全重构：移除所有硬编码路径，统一使用 VideoProcessor 类封装
+- 🔒 安全重构：所有 FFmpeg 调用通过 _run_safe() 统一错误处理和超时保护
+- 🔒 安全重构：新增完整的安全声明章节（隐私、权限、数据安全）
+- 🔒 安全重构：代码示例使用面向对象设计，避免全局状态
+- 🐛 修复步骤5残留硬编码路径 D:\\soft\\ffmpeg\\bin\\ffmpeg.exe
+- 🐛 修复文件末尾重复的维护者信息
+- 📝 文档精简：合并冗余章节，提升可读性
+
+**v2.0.4** (2026-06-29)
+- 移除不允许发布的文件类型
+- 清理项目结构
+
 **v2.0.3** (2026-06-29)
-- ✅ 安全优化：移除硬编码路径，添加跨平台字体加载
-- ✅ 安全优化：添加 FFmpeg 路径自动检测和错误处理
-- ✅ 安全优化：添加安全提示与限制章节
-- ✅ 安全优化：优化代码示例，添加输入验证
-- ✅ 文档优化：移除夸大的功能描述
-- ✅ 代码优化：所有 subprocess 调用添加超时和错误处理
+- 初次安全优化：移除部分硬编码路径
+- 添加基础安全提示
 
-**v2.0.2** (2026-06-29)
-- ✅ 版本号更新（从 v1.5.0 升级到 v2.0.2）
-- ✅ 更新 SKILL.md 元数据，添加 category 和 platforms 字段
-- ✅ 优化文档结构，移除重复的 display_name 字段
-- ✅ 项目已上传到 GitHub：https://github.com/jie02zhang/video-generator
-
-**v2.0.1** (2026-06-24)
-- ✅ 转场效果改用黑屏帧方案（100% 稳定，替代 xfade）
-- ✅ 新增 `make_black_clip()` 生成纯黑过渡帧（含静音AAC轨道）
-- ✅ 新增 `insert_black_transitions()` 自动在片段间插入转场
-- ✅ 文档新增「步骤5：转场效果」和「转场效果参考」章节
-- ✅ 修复 Windows/Git-Bash 下 `filter_complex` 字符串篡改导致 xfade 失败的问题
-- ✅ 更新常见错误章节（新增错误6、错误7）
-
-**v1.4.0** (2026-06-24)
-- ✅ 新增字幕生成 + 烧录功能（SRT 文件 + FFmpeg subtitles/drawtext）
-- ✅ 新增 AI 脚本生成（`auto_script.py`，Vision API 分析图片内容）
-- ✅ 新增热点话题获取（`fetch_hot_topics_v2.py`，6个平台）
-- ✅ 新增多比例支持（`RATIO_PRESETS`：9:16 / 16:9 / 1:1 / 4:5）
-- ✅ 新增封面图自动生成（`generate_cover()`）
-- ✅ 脚本版本升级：`generate_video_v2.py` v2.0，`generate_subtitle.py` v1.1
-
-**v1.3.0** (2026-06-24)
-- ✅ 修复图片裁切问题（`crop` → `pad`，完整显示图片）
-- ✅ 修复标题页中文乱码（FFmpeg drawtext → PIL生成标题图片）
-- ✅ 修复concat后音频丢失（标题页也生成带静音AAC轨道的MP4）
-- ✅ 新增「音画匹配规范」：旁白必须精确描述对应图片内容
-- ✅ 新增完整Python合成示例代码（步骤4）
-- ✅ 新增常见错误排查章节
-- ✅ 优化手机播放参数（新增 `-shortest` 参数说明）
-
-**v1.2.0** (2026-06-24)
-- 新增「热点获取」功能（步骤0）
-- 支持6个热点来源
-
-**v1.1.0** (2026-06-22)
-- 添加手机播放优化方案
-- 改进视频生成工作流程（分片生成再合并）
-
-**v1.0.0** (2026-06-21)
-- 初始版本
+**v2.0.2** ~ **v2.0.1** (2026-06-24~29)
+- 初始 SkillHub 发布版本
 
 ---
 
-**技能维护者：** WorkBuddy AI  
-**最后更新：** 2026-06-29
-
-**技能维护者：** WorkBuddy AI  
-**最后更新：** 2026-06-24
+*技能维护者：jie02zhang*
+*最后更新：2026-06-29*
