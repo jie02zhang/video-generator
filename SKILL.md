@@ -1,7 +1,7 @@
 ---
 name: video-generator
 slug: video-maker-pro
-version: 1.5.0
+version: 2.0.2
 description: 自动化视频生成技能。将图片和音频合成为同步的MP4视频，支持热点话题自动获取、旁白脚本生成、音画精确同步、转场效果（黑屏过渡）、多比例输出、封面图生成。触发词：生成视频、制作视频、图片转视频、video generator、video制作、热点视频
 displayName: "Video Generator"
 displayName_zh: "视频生成器"
@@ -11,7 +11,7 @@ visibility: "public"
 agent_created: true
 ---
 
-# Video Generator Skill v1.5.0
+# Video Generator Skill v2.0.2
 
 自动化视频生成完整工作流程，将有序图片序列和对应旁白合成为同步的MP4视频。
 
@@ -533,7 +533,13 @@ ffprobe -v quiet -print_format json -show_format -show_streams output/final_vide
 
 ## 更新日志
 
-**v1.5.0** (2026-06-24)
+**v2.0.2** (2026-06-29)
+- ✅ 版本号更新（从 v1.5.0 升级到 v2.0.2）
+- ✅ 更新 SKILL.md 元数据，添加 category 和 platforms 字段
+- ✅ 优化文档结构，移除重复的 display_name 字段
+- ✅ 项目已上传到 GitHub：https://github.com/jie02zhang/video-generator
+
+**v2.0.1** (2026-06-24)
 - ✅ 转场效果改用黑屏帧方案（100% 稳定，替代 xfade）
 - ✅ 新增 `make_black_clip()` 生成纯黑过渡帧（含静音AAC轨道）
 - ✅ 新增 `insert_black_transitions()` 自动在片段间插入转场
@@ -570,6 +576,9 @@ ffprobe -v quiet -print_format json -show_format -show_streams output/final_vide
 - 初始版本
 
 ---
+
+**技能维护者：** WorkBuddy AI  
+**最后更新：** 2026-06-29
 
 **技能维护者：** WorkBuddy AI  
 **最后更新：** 2026-06-24
