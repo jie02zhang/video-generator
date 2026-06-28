@@ -5,10 +5,8 @@ version: 1.5.0
 description: 自动化视频生成技能。将图片和音频合成为同步的MP4视频，支持热点话题自动获取、旁白脚本生成、音画精确同步、转场效果（黑屏过渡）、多比例输出、封面图生成。触发词：生成视频、制作视频、图片转视频、video generator、video制作、热点视频
 displayName: "Video Generator"
 displayName_zh: "视频生成器"
-displayName_en: "Video Generator"
-display_name: "Video Generator"
-display_name_zh: "视频生成器"
-display_name_en: "Video Generator"
+category: "多媒体处理"
+platforms: ["WorkBuddy", "OpenClaw"]
 visibility: "public"
 agent_created: true
 ---
