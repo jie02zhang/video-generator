@@ -1,0 +1,58 @@
+# Video Generator 配置文件
+
+# 默认模型
+default_image_model: mock
+default_video_model: mock
+
+# 模型配置
+models:
+  mock:
+    enabled: true
+    
+  local-sd:
+    enabled: false
+    model_path: ""
+    api_endpoint: "http://localhost:7860"
+    
+  dall-e:
+    enabled: false
+    api_key: ""
+    model: "dall-e-3"
+    api_base: "https://api.openai.com/v1"
+    
+  runway:
+    enabled: false
+    api_key: ""
+    model: "gen-3"
+    
+  kling:
+    enabled: false
+    api_key: ""
+    model: "kling-v1"
+    api_base: "https://api.kling.ai/v1"
+
+# 日志配置
+logging:
+  level: INFO
+  log_file: logs/video-generator.log
+  max_bytes: 10485760  # 10MB
+  backup_count: 5
+
+# 生成配置
+generation:
+  image:
+    default_size: "512x512"
+    max_num_images: 4
+    timeout: 60
+    
+  video:
+    default_duration: "5s"
+    max_duration: "30s"
+    timeout: 300
+    poll_interval: 5
+
+# 重试配置
+retry:
+  max_retries: 3
+  delay: 1.0
+  backoff_factor: 2.0
