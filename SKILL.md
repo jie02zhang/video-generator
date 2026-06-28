@@ -1,7 +1,7 @@
 ---
 name: video-generator
-slug: video-generator-jie02zhang
-version: 1.0.0
+slug: video-maker-pro
+version: 3.0.0
 description: 自动化视频生成技能。将图片序列和旁白音频合成为同步MP4视频，支持音画精确同步、转场效果、多比例输出。需要 FFmpeg 和 edge-tts 依赖。
 displayName: "Video Generator"
 displayName_zh: "视频生成器"
