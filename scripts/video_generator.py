@@ -16,6 +16,7 @@ import shutil
 import json
 import asyncio
 import tempfile
+import stat
 from typing import List, Tuple, Optional, Dict
 
 
@@ -33,18 +34,16 @@ class VideoProcessor:
         "4:5": (1080, 1350),
     }
 
-    def __init__(self, ffmpeg_path: Optional[str] = None):
+    def __init__(self, ffmpeg_path: Optional[str] = None, allowed_dirs: Optional[List[str]] = None):
         """
         初始化处理器。
 
-        FFmpeg 路径检测优先级：
-        1. 构造参数 ffmpeg_path
-        2. 环境变量 FFMPEG_PATH 或 FFMPEG
-        3. 系统 PATH（shutil.which）
-        4. 常见安装路径（/usr/local/bin/ffmpeg 等）
+        :param ffmpeg_path: 指定的 FFmpeg 路径
+        :param allowed_dirs: 允许访问的目录白名单（防止路径遍历）
         """
         self.ffmpeg = self._resolve_ffmpeg(ffmpeg_path)
         self.tmp_files: List[str] = []
+        self.allowed_dirs = [os.path.abspath(d) for d in (allowed_dirs or [])]
 
     @staticmethod
     def _resolve_ffmpeg(path: Optional[str]) -> str:
@@ -81,6 +80,23 @@ class VideoProcessor:
             "请安装 FFmpeg (https://ffmpeg.org) 并添加到系统 PATH，\n"
             "或设置环境变量 FFMPEG_PATH 指向 ffmpeg 可执行文件。"
         )
+
+    def _validate_path(self, path: str, check_allowed: bool = True) -> str:
+        """
+        验证路径安全性（防止路径遍历）
+
+        :param path: 待验证路径
+        :param check_allowed: 是否检查白名单目录
+        :return: 规范化后的绝对路径
+        :raises PermissionError: 路径不在白名单内
+        """
+        abs_path = os.path.abspath(path)
+
+        if check_allowed and self.allowed_dirs:
+            if not any(abs_path.startswith(allowed) for allowed in self.allowed_dirs):
+                raise PermissionError(f"路径不在允许的目录内: {abs_path}")
+
+        return abs_path
 
     def _run_safe(
         self,
@@ -137,6 +153,11 @@ class VideoProcessor:
         :param ratio: 视频比例
         :return: 输出文件路径
         """
+        # 路径安全检查
+        image_path = self._validate_path(image_path)
+        audio_path = self._validate_path(audio_path)
+        output_path = self._validate_path(output_path)
+
         for p, label in [(image_path, "图片"), (audio_path, "音频")]:
             if not os.path.isfile(p):
                 raise FileNotFoundError(f"{label}文件不存在: {p}")
@@ -173,6 +194,9 @@ class VideoProcessor:
         :param ratio: 视频比例
         :return: 输出文件路径
         """
+        title_image_path = self._validate_path(title_image_path)
+        output_path = self._validate_path(output_path)
+
         if not os.path.isfile(title_image_path):
             raise FileNotFoundError(f"标题页图片不存在: {title_image_path}")
 
@@ -228,6 +252,7 @@ class VideoProcessor:
         :param ratio: 视频比例
         :return: 输出文件路径
         """
+        output_path = self._validate_path(output_path)
         w, h = self.RATIO_PRESETS.get(ratio, (1080, 1920))
         tmp_v = output_path + ".tmp_v.mp4"
         tmp_a = output_path + ".tmp_a.m4a"
@@ -274,7 +299,10 @@ class VideoProcessor:
         :param final_output_path: 最终输出路径
         :return: 输出文件路径
         """
+        final_output_path = self._validate_path(final_output_path)
+
         for clip in clip_list:
+            clip = self._validate_path(clip)
             if not os.path.isfile(clip):
                 raise FileNotFoundError(f"待拼接片段不存在: {clip}")
 
@@ -284,8 +312,9 @@ class VideoProcessor:
         try:
             with open(concat_file, "w", encoding="utf-8") as f:
                 for clip_path in clip_list:
-                    # FFmpeg concat demuxer 格式：file '路径'
-                    f.write(f"file '{os.path.abspath(clip_path)}'\n")
+                    # 转义单引号（防止命令注入）
+                    safe_path = os.path.abspath(clip_path).replace("'", "'\\''")
+                    f.write(f"file '{safe_path}'\n")
 
             self._run_safe([
                 self.ffmpeg, "-y",
@@ -301,10 +330,13 @@ class VideoProcessor:
         return final_output_path
 
     def _cleanup_tmp(self) -> None:
-        """清理临时文件"""
+        """清理临时文件（设置安全权限）"""
         for tmp in self.tmp_files:
             if os.path.exists(tmp):
                 try:
+                    # Windows: 先设置只读属性，然后删除
+                    if os.name == 'nt':
+                        os.chmod(tmp, stat.S_IREAD)
                     os.remove(tmp)
                 except OSError:
                     pass
@@ -317,6 +349,8 @@ class VideoProcessor:
         :param video_path: 视频文件路径
         :return: (是否通过, 检查详情字典)
         """
+        video_path = self._validate_path(video_path, check_allowed=False)
+
         if not os.path.isfile(video_path):
             return False, {"文件存在": False}
 
@@ -487,6 +521,7 @@ def generate_video(
     ratio: str = "9:16",
     transition: bool = True,
     transition_duration: float = 0.5,
+    allowed_dirs: Optional[List[str]] = None,
 ) -> str:
     """
     完整视频生成流程。
@@ -501,9 +536,13 @@ def generate_video(
     :param transition_duration: 转场持续时间（秒）
     :return: 最终视频路径
     """
-    proc = VideoProcessor()
+    proc = VideoProcessor(allowed_dirs=allowed_dirs)
     clips: List[str] = []
     work_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+
+    # 如果提供了 allowed_dirs，验证 work_dir
+    if allowed_dirs:
+        work_dir = proc._validate_path(work_dir)
 
     # 1. 标题页（可选）
     if title_config:
@@ -549,6 +588,7 @@ if __name__ == "__main__":
     parser.add_argument("--title", help="标题页主标题（不提供则不生成标题页）")
     parser.add_argument("--subtitle", default="", help="标题页副标题")
     parser.add_argument("--no-transition", action="store_true", help="禁用转场效果")
+    parser.add_argument("--allowed-dirs", nargs="+", help="允许访问的目录白名单（防止路径遍历）")
     args = parser.parse_args()
 
     if len(args.images) != len(args.audios):
@@ -565,6 +605,7 @@ if __name__ == "__main__":
         title_config=title_cfg,
         ratio=args.ratio,
         transition=not args.no_transition,
+        allowed_dirs=args.allowed_dirs,
     )
 
     print(f"视频生成成功：{result}")
