@@ -19,7 +19,7 @@ import tempfile
 import stat
 import time
 import threading
-from typing import List, Tuple, Optional, Dict, Callable
+from typing import List, Tuple, Optional, Dict, Callable, Any
 from functools import wraps
 
 
@@ -196,31 +196,52 @@ class VideoProcessor:
         cmd: List[str],
         description: str = "FFmpeg 操作",
         timeout: int = 300,
+        max_retries: int = 2,
     ) -> None:
         """
         安全执行 FFmpeg 命令。
-        统一超时控制、错误捕获和日志记录。
+        统一超时控制、错误捕获、日志记录和重试机制。
 
         :param cmd: FFmpeg 命令参数列表
         :param description: 操作描述（用于错误信息）
         :param timeout: 超时时间（秒）
+        :param max_retries: 最大重试次数
         :raises RuntimeError: 命令执行失败时抛出
         """
-        try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout
-            )
-            if result.returncode != 0:
-                error_msg = result.stderr.strip()[-500:] or "未知错误（无 stderr 输出）"
-                raise RuntimeError(
-                    f"{description} 失败 (exit code={result.returncode}):\n{error_msg}"
+        last_error = None
+        for attempt in range(1, max_retries + 2):  # 首次 + max_retries 次重试
+            try:
+                result = subprocess.run(
+                    cmd, capture_output=True, text=True, timeout=timeout
                 )
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"{description} 超时（>{timeout}秒），请检查输入文件是否正常")
-        except FileNotFoundError as e:
-            raise RuntimeError(f"无法执行 FFmpeg：{e}")
-        except Exception as e:
-            raise RuntimeError(f"{description} 发生异常：{e}")
+                if result.returncode != 0:
+                    error_msg = result.stderr.strip()[-500:] or "未知错误（无 stderr 输出）"
+                    if attempt <= max_retries + 1:
+                        last_error = RuntimeError(
+                            f"{description} 失败 (exit code={result.returncode}):\n{error_msg}"
+                        )
+                        time.sleep(min(2 ** attempt, 10))  # 指数退避
+                        continue
+                    raise RuntimeError(
+                        f"{description} 失败 (exit code={result.returncode}):\n{error_msg}"
+                    )
+                return  # 成功，直接返回
+            except subprocess.TimeoutExpired as e:
+                if attempt <= max_retries + 1:
+                    last_error = RuntimeError(f"{description} 超时（>{timeout}秒），正在重试...")
+                    time.sleep(2)
+                    continue
+                raise RuntimeError(f"{description} 超时（>{timeout}秒），请检查输入文件是否正常")
+            except FileNotFoundError as e:
+                raise RuntimeError(f"无法执行 FFmpeg：{e}")
+            except Exception as e:
+                if attempt <= max_retries + 1:
+                    last_error = RuntimeError(f"{description} 发生异常：{e}")
+                    time.sleep(1)
+                    continue
+                raise RuntimeError(f"{description} 发生异常：{e}")
+        if last_error:
+            raise last_error
 
     def _vf_pad(self, ratio: str = "9:16") -> str:
         """生成 FFmpeg pad 滤镜字符串（等比缩放 + 黑边填充，不裁切）"""
@@ -236,6 +257,7 @@ class VideoProcessor:
         audio_path: str,
         output_path: str,
         ratio: str = "9:16",
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
         单个图片 + 音频 → 完整 MP4 片段（含 video + audio 双流）
@@ -244,8 +266,12 @@ class VideoProcessor:
         :param audio_path: 输入音频路径
         :param output_path: 输出 MP4 路径
         :param ratio: 视频比例
+        :param progress_callback: 进度回调函数，接收状态描述字符串
         :return: 输出文件路径
         """
+        if progress_callback:
+            progress_callback(f"正在处理片段: {os.path.basename(image_path)}")
+
         # 路径安全检查
         image_path = self._validate_path(image_path)
         audio_path = self._validate_path(audio_path)
@@ -277,6 +303,7 @@ class VideoProcessor:
         output_path: str,
         duration: float = 3.0,
         ratio: str = "9:16",
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
         标题页图片 → MP4（含静音 AAC 音频轨道，保证流结构一致）
@@ -285,8 +312,12 @@ class VideoProcessor:
         :param output_path: 输出 MP4 路径
         :param duration: 标题页持续时间（秒）
         :param ratio: 视频比例
+        :param progress_callback: 进度回调函数，接收状态描述字符串
         :return: 输出文件路径
         """
+        if progress_callback:
+            progress_callback("正在生成标题页...")
+
         title_image_path = self._validate_path(title_image_path)
         output_path = self._validate_path(output_path)
 
@@ -336,6 +367,7 @@ class VideoProcessor:
         output_path: str,
         duration: float = 0.5,
         ratio: str = "9:16",
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
         生成黑屏过渡帧（含静音 AAC 轨道）
@@ -343,8 +375,12 @@ class VideoProcessor:
         :param output_path: 输出 MP4 路径
         :param duration: 黑屏持续时间（秒）
         :param ratio: 视频比例
+        :param progress_callback: 进度回调函数，接收状态描述字符串
         :return: 输出文件路径
         """
+        if progress_callback:
+            progress_callback("正在生成转场帧...")
+
         output_path = self._validate_path(output_path)
         w, h = self.RATIO_PRESETS.get(ratio, (1080, 1920))
         tmp_v = output_path + ".tmp_v.mp4"
@@ -384,14 +420,19 @@ class VideoProcessor:
         self,
         clip_list: List[str],
         final_output_path: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
         拼接多个 MP4 片段（所有片段必须具有相同的流结构）
 
         :param clip_list: 片段路径列表
         :param final_output_path: 最终输出路径
+        :param progress_callback: 进度回调函数，接收状态描述字符串
         :return: 输出文件路径
         """
+        if progress_callback:
+            progress_callback(f"正在拼接 {len(clip_list)} 个片段...")
+
         final_output_path = self._validate_path(final_output_path)
 
         for clip in clip_list:
@@ -485,6 +526,7 @@ class VideoProcessor:
         video_path: str,
         watermark_text: str = "Generated by Video Generator",
         position: str = "SE",
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> str:
         """
         在视频右下角添加文字水印
@@ -492,8 +534,12 @@ class VideoProcessor:
         :param video_path: 输入视频路径
         :param watermark_text: 水印文字
         :param position: 水印位置（SE=右下角, SW=左下角, NE=右上角, NW=左上角）
+        :param progress_callback: 进度回调函数，接收状态描述字符串
         :return: 带水印的视频路径
         """
+        if progress_callback:
+            progress_callback("正在添加水印...")
+
         video_path = self._validate_path(video_path, check_allowed=False)
         wm_path = video_path.replace(".mp4", "_wm.mp4")
 
@@ -649,6 +695,60 @@ def generate_audio_sync(
 
 # ===== 完整视频生成流程 =====
 
+CHECKPOINT_SUFFIX = ".checkpoint.json"
+
+
+def save_checkpoint(
+    checkpoint_path: str,
+    completed_steps: List[str],
+    current_step: str,
+    total_steps: int,
+) -> None:
+    """
+    保存当前进度到检查点文件。
+
+    :param checkpoint_path: 检查点文件路径
+    :param completed_steps: 已完成步骤列表
+    :param current_step: 当前正在执行的步骤
+    :param total_steps: 总步骤数
+    """
+    try:
+        with open(checkpoint_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "completed_steps": completed_steps,
+                "current_step": current_step,
+                "total_steps": total_steps,
+                "timestamp": time.time(),
+            }, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass  # 检查点保存失败不中断主流程
+
+
+def load_checkpoint(checkpoint_path: str) -> Optional[Dict]:
+    """
+    加载检查点，用于断点续传。
+
+    :param checkpoint_path: 检查点文件路径
+    :return: 检查点数据字典，不存在时返回 None
+    """
+    if not os.path.isfile(checkpoint_path):
+        return None
+    try:
+        with open(checkpoint_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def clear_checkpoint(checkpoint_path: str) -> None:
+    """清除检查点文件（视频生成完成后调用）"""
+    if os.path.isfile(checkpoint_path):
+        try:
+            os.remove(checkpoint_path)
+        except Exception:
+            pass
+
+
 @rate_limit(max_calls=20, window=3600)
 def generate_video(
     image_audio_pairs: List[Tuple[str, str]],
@@ -658,60 +758,154 @@ def generate_video(
     transition: bool = True,
     transition_duration: float = 0.5,
     allowed_dirs: Optional[List[str]] = None,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    enable_checkpoint: bool = True,
 ) -> str:
     """
-    完整视频生成流程。
+    完整视频生成流程（支持进度回调和断点续传）。
 
     :param image_audio_pairs: [(图片路径, 音频路径), ...]
     :param output_path: 最终视频输出路径
-    :param title_config: 标题页配置，格式：
-        {"title": "...", "subtitle": "...", "tag": "...", "channel": "..."}
-        为 None 时不生成标题页
+    :param title_config: 标题页配置
     :param ratio: 视频比例
     :param transition: 是否启用黑屏转场
     :param transition_duration: 转场持续时间（秒）
+    :param allowed_dirs: 允许访问的目录白名单
+    :param progress_callback: 进度回调函数，接收 (current_step, total_steps, status_message)
+    :param enable_checkpoint: 是否启用断点续传
     :return: 最终视频路径
     """
     proc = VideoProcessor(allowed_dirs=allowed_dirs)
     clips: List[str] = []
     work_dir = os.path.dirname(os.path.abspath(output_path)) or "."
+    checkpoint_path = output_path + CHECKPOINT_SUFFIX
+
+    # 计算总步骤数
+    total_steps = 1 + len(image_audio_pairs) * (2 if transition else 1) + 2
+    current_step = 0
+
+    # 加载检查点（断点续传）
+    checkpoint = None
+    completed = set()
+    if enable_checkpoint:
+        checkpoint = load_checkpoint(checkpoint_path)
+        if checkpoint:
+            completed = set(checkpoint.get("completed_steps", []))
+
+    def report(status: str) -> None:
+        nonlocal current_step
+        current_step += 1
+        if progress_callback:
+            progress_callback(current_step, total_steps, status)
 
     # 如果提供了 allowed_dirs，验证 work_dir
     if allowed_dirs:
         work_dir = proc._validate_path(work_dir)
 
     # 1. 标题页（可选）
-    if title_config:
+    title_step = "title"
+    if title_config and title_step not in completed:
+        report("正在生成标题页...")
         title_img = os.path.join(work_dir, "_title.png")
         title_mp4 = os.path.join(work_dir, "_title.mp4")
         create_title_image(title_img, **title_config)
-        proc.make_title_clip(title_img, title_mp4, ratio=ratio)
+        proc.make_title_clip(title_img, title_mp4, ratio=ratio, progress_callback=lambda s: None)
         clips.append(title_mp4)
+        if enable_checkpoint:
+            save_checkpoint(checkpoint_path, list(completed | {title_step}), "title_done", total_steps)
 
     # 2. 内容片段
     for i, (img, aud) in enumerate(image_audio_pairs, 1):
-        seg_path = os.path.join(work_dir, f"_seg_{i:02d}.mp4")
-        proc.make_segment(img, aud, seg_path, ratio=ratio)
-        clips.append(seg_path)
+        seg_key = f"seg_{i}"
+        if seg_key not in completed:
+            report(f"正在处理第 {i}/{len(image_audio_pairs)} 个片段...")
+            seg_path = os.path.join(work_dir, f"_seg_{i:02d}.mp4")
+            proc.make_segment(img, aud, seg_path, ratio=ratio, progress_callback=lambda s: None)
+            clips.append(seg_path)
+            if enable_checkpoint:
+                save_checkpoint(checkpoint_path, list(completed | {seg_key}), f"seg_{i}_done", total_steps)
 
-        # 插入黑屏转场（最后一段之后不加）
+        # 插入黑屏转场
         if transition and i < len(image_audio_pairs):
-            black_path = os.path.join(work_dir, f"_trans_{i:02d}.mp4")
-            proc.make_black_frame(black_path, duration=transition_duration, ratio=ratio)
-            clips.append(black_path)
+            trans_key = f"trans_{i}"
+            if trans_key not in completed:
+                report(f"正在生成第 {i} 个转场...")
+                black_path = os.path.join(work_dir, f"_trans_{i:02d}.mp4")
+                proc.make_black_frame(black_path, duration=transition_duration, ratio=ratio, progress_callback=lambda s: None)
+                clips.append(black_path)
+                if enable_checkpoint:
+                    save_checkpoint(checkpoint_path, list(completed | {trans_key}), f"trans_{i}_done", total_steps)
 
     # 3. 拼接
-    final_path = proc.concat_clips(clips, output_path)
+    concat_key = "concat"
+    if concat_key not in completed:
+        report("正在拼接视频片段...")
+        final_path = proc.concat_clips(clips, output_path, progress_callback=lambda s: None)
+        if enable_checkpoint:
+            save_checkpoint(checkpoint_path, list(completed | {concat_key}), "concat_done", total_steps)
 
-    # 3.5 添加水印（版权合规）
-    wm_path = proc.add_watermark(final_path, watermark_text="Generated by Video Generator")
+    # 3.5 添加水印
+    wm_key = "watermark"
+    if wm_key not in completed:
+        report("正在添加水印...")
+        wm_path = proc.add_watermark(final_path, watermark_text="Generated by Video Generator", progress_callback=lambda s: None)
+        if enable_checkpoint:
+            save_checkpoint(checkpoint_path, list(completed | {wm_key}), "wm_done", total_steps)
 
     # 4. 验证
+    report("正在验证输出视频...")
     ok, details = proc.verify_output(wm_path)
     if not ok:
         raise RuntimeError(f"输出视频验证失败：{details}")
 
+    # 清除检查点
+    if enable_checkpoint:
+        clear_checkpoint(checkpoint_path)
+
+    report("视频生成完成！")
     return wm_path
+
+
+async def generate_video_async(
+    image_audio_pairs: List[Tuple[str, str]],
+    output_path: str,
+    title_config: Optional[Dict] = None,
+    ratio: str = "9:16",
+    transition: bool = True,
+    transition_duration: float = 0.5,
+    allowed_dirs: Optional[List[str]] = None,
+    progress_callback: Optional[Callable[[int, int, str], None]] = None,
+    enable_checkpoint: bool = True,
+) -> str:
+    """
+    异步版本的视频生成（在线程池中执行，不阻塞事件循环）。
+
+    :param image_audio_pairs: [(图片路径, 音频路径), ...]
+    :param output_path: 最终视频输出路径
+    :param title_config: 标题页配置
+    :param ratio: 视频比例
+    :param transition: 是否启用黑屏转场
+    :param transition_duration: 转场持续时间（秒）
+    :param allowed_dirs: 允许访问的目录白名单
+    :param progress_callback: 进度回调函数
+    :param enable_checkpoint: 是否启用断点续传
+    :return: 最终视频路径
+    """
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(
+        None,
+        lambda: generate_video(
+            image_audio_pairs=image_audio_pairs,
+            output_path=output_path,
+            title_config=title_config,
+            ratio=ratio,
+            transition=transition,
+            transition_duration=transition_duration,
+            allowed_dirs=allowed_dirs,
+            progress_callback=progress_callback,
+            enable_checkpoint=enable_checkpoint,
+        )
+    )
 
 
 # ===== CLI 入口 =====
