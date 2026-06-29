@@ -1,17 +1,21 @@
 ---
 name: video-generator
 slug: video-maker-pro
-version: 3.1.0
-description: 自动化视频生成技能。接收有序图片序列和旁白文本，自动生成带语音同步的MP4视频。支持多比例输出、转场效果。需本地安装 FFmpeg 和 edge-tts。
+version: 3.3.0
+manifest_version: "1.0"
+description: 自动化视频生成技能。将图片序列和旁白音频合成为同步MP4视频，支持多比例输出、转场效果。需本地安装 FFmpeg 和 edge-tts。
 displayName: "Video Generator"
 displayName_zh: "视频生成器"
 category: "多媒体处理"
-platforms: ["WorkBuddy"]
+platforms: ["WorkBuddy", "OpenClaw"]
 visibility: "public"
 agent_created: true
+dependencies:
+  - Pillow>=9.0.0
+  - edge-tts>=6.1.9
 ---
 
-# Video Generator Skill
+# Video Generator Skill v3.3.0
 
 接收有序图片序列和旁白文本，自动生成音画同步的 MP4 视频。
 

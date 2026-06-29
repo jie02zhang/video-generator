@@ -1,0 +1,13 @@
+# Video Generator 依赖清单
+# 安装方式：pip install -r requirements.txt
+
+# 图片处理（标题页生成）
+Pillow>=9.0.0
+
+# 语音合成（旁白生成）
+edge-tts>=6.1.9
+
+# 视频处理（需系统安装 FFmpeg）
+# Windows: https://ffmpeg.org/download.html
+# macOS: brew install ffmpeg
+# Ubuntu: sudo apt install ffmpeg
